@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>डैशबोर्ड - डोमेन मैनेजर</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>डैशबोर्ड</h1>
+            <div class="header-actions">
+                <span id="welcomeUser"></span>
+                <button id="logoutBtn" class="btn btn-secondary">लॉग आउट</button>
+            </div>
+        </header>
+
+        <main class="main">
+            <!-- Domain Management Section -->
+            <section class="section">
+                <h2>डोमेन प्रबंधन</h2>
+                <div class="domain-form">
+                    <input type="text" id="domainInput" placeholder="example.com" maxlength="100">
+                    <button id="addDomainBtn" class="btn btn-primary">डोमेन जोड़ें</button>
+                </div>
+                
+                <div id="domainsList" class="domains-list"></div>
+            </section>
+
+            <!-- File Upload Section -->
+            <section class="section">
+                <h2>HTML फ़ाइल अपलोड</h2>
+                <div class="upload-form">
+                    <input type="file" id="fileInput" multiple accept=".html" class="file-input">
+                    <button id="uploadBtn" class="btn btn-primary">फ़ाइलें अपलोड करें</button>
+                </div>
+                
+                <div id="filesList" class="files-list"></div>
+            </section>
+
+            <!-- Nginx Configuration Section -->
+            <section class="section">
+                <h2>Nginx कॉन्फ़िगरेशन स्थिति</h2>
+                <div id="nginxStatus" class="nginx-status">
+                    <p>कॉन्फ़िगरेशन स्वचालित रूप से अपडेट होती है जब आप डोमेन जोड़ते या हटाते हैं।</p>
+                </div>
+            </section>
+        </main>
+
+        <div id="message" class="message"></div>
+    </div>
+
+    <script>
+        let userData = null;
+
+        // Load user data and initialize dashboard
+        async function loadUserData() {
+            try {
+                const response = await fetch('/api/user');
+                userData = await response.json();
+                
+                document.getElementById('welcomeUser').textContent = `स्वागत, ${userData.username}!`;
+                renderDomains();
+                loadFiles();
+            } catch (error) {
+                showMessage('उपयोगकर्ता डेटा लोड करने में त्रुटि', 'error');
+            }
+        }
+
+        // Render domains list
+        function renderDomains() {
+            const domainsList = document.getElementById('domainsList');
+            
+            if (userData.domains.length === 0) {
+                domainsList.innerHTML = '<p class="no-data">कोई डोमेन नहीं जोड़ा गया</p>';
+                return;
+            }
+            
+            domainsList.innerHTML = userData.domains.map(domain => `
+                <div class="domain-item">
+                    <div class="domain-info">
+                        <h3>${domain.domain}</h3>
+                        <span class="ssl-status ${domain.sslEnabled ? 'ssl-enabled' : 'ssl-disabled'}">
+                            ${domain.sslEnabled ? 'SSL सक्रिय' : 'SSL निष्क्रिय'}
+                        </span>
+                    </div>
+                    <div class="domain-actions">
+                        ${!domain.sslEnabled ? `<button onclick="enableSSL('${domain.domain}')" class="btn btn-small">SSL सक्रिय करें</button>` : ''}
+                        <button onclick="deleteDomain('${domain.domain}')" class="btn btn-danger btn-small">हटाएं</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Add domain
+        document.getElementById('addDomainBtn').addEventListener('click', async () => {
+            const domain = document.getElementById('domainInput').value.trim();
+            
+            if (!domain) {
+                showMessage('कृपया डोमेन नाम दर्ज करें', 'error');
+                return;
+            }
+            
+            if (userData.domains.length >= 2) {
+                showMessage('अधिकतम 2 डोमेन की अनुमति है', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/domains', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ domain })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage('डोमेन सफलतापूर्वक जोड़ा गया', 'success');
+                    document.getElementById('domainInput').value = '';
+                    loadUserData();
+                } else {
+                    showMessage(result.error, 'error');
+                }
+            } catch (error) {
+                showMessage('डोमेन जोड़ने में त्रुटि', 'error');
+            }
+        });
+
+        // Delete domain
+        async function deleteDomain(domain) {
+            if (!confirm(`क्या आप वाकई ${domain} को हटाना चाहते हैं?`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/domains/${encodeURIComponent(domain)}`, {
+                    method: 'DELETE'
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage('डोमेन सफलतापूर्वक हटाया गया', 'success');
+                    loadUserData();
+                } else {
+                    showMessage(result.error, 'error');
+                }
+            } catch (error) {
+                showMessage('डोमेन हटाने में त्रुटि', 'error');
+            }
+        }
+
+        // Enable SSL
+        async function enableSSL(domain) {
+            try {
+                const response = await fetch(`/api/ssl/${encodeURIComponent(domain)}`, {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage('SSL सफलतापूर्वक सक्रिय किया गया', 'success');
+                    loadUserData();
+                } else {
+                    showMessage(result.error, 'error');
+                }
+            } catch (error) {
+                showMessage('SSL सक्रिय करने में त्रुटि', 'error');
+            }
+        }
+
+        // Upload files
+        document.getElementById('uploadBtn').addEventListener('click', async () => {
+            const fileInput = document.getElementById('fileInput');
+            const files = fileInput.files;
+            
+            if (files.length === 0) {
+                showMessage('कृपया फ़ाइलें चुनें', 'error');
+                return;
+            }
+            
+            const formData = new FormData();
+            for (let file of files) {
+                formData.append('htmlFiles', file);
+            }
+            
+            try {
+                const response = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage('फ़ाइलें सफलतापूर्वक अपलोड हुईं', 'success');
+                    fileInput.value = '';
+                    loadFiles();
+                } else {
+                    showMessage(result.error, 'error');
+                }
+            } catch (error) {
+                showMessage('फ़ाइल अपलोड में त्रुटि', 'error');
+            }
+        });
+
+        // Load files
+        async function loadFiles() {
+            try {
+                const response = await fetch('/api/files');
+                const files = await response.json();
+                
+                const filesList = document.getElementById('filesList');
+                
+                if (files.length === 0) {
+                    filesList.innerHTML = '<p class="no-data">कोई फ़ाइल अपलोड नहीं की गई</p>';
+                    return;
+                }
+                
+                filesList.innerHTML = files.map(file => `
+                    <div class="file-item">
+                        <span class="file-name">${file}</span>
+                        <button onclick="deleteFile('${file}')" class="btn btn-danger btn-small">हटाएं</button>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Error loading files:', error);
+            }
+        }
+
+        // Delete file
+        async function deleteFile(filename) {
+            if (!confirm(`क्या आप वाकई ${filename} को हटाना चाहते हैं?`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/files/${encodeURIComponent(filename)}`, {
+                    method: 'DELETE'
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage('फ़ाइल सफलतापूर्वक हटाई गई', 'success');
+                    loadFiles();
+                } else {
+                    showMessage(result.error, 'error');
+                }
+            } catch (error) {
+                showMessage('फ़ाइल हटाने में त्रुटि', 'error');
+            }
+        }
+
+        // Logout
+        document.getElementById('logoutBtn').addEventListener('click', async () => {
+            try {
+                await fetch('/api/logout', { method: 'POST' });
+                window.location.href = '/';
+            } catch (error) {
+                showMessage('लॉग आउट में त्रुटि', 'error');
+            }
+        });
+
+        // Show message
+        function showMessage(text, type) {
+            const messageDiv = document.getElementById('message');
+            messageDiv.innerHTML = `<div class="${type}">${text}</div>`;
+            setTimeout(() => {
+                messageDiv.innerHTML = '';
+            }, 5000);
+        }
+
+        // Initialize dashboard
+        loadUserData();
+    </script>
+</body>
+</html>
